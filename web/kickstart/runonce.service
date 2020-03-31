@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Once
+After=network-online.target
+Requires=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=
+ExecStart=/root/runonce/runonce.pl
+
+[Install]
+WantedBy=multi-user.target

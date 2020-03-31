@@ -1,0 +1,8 @@
+d-i preseed/late_command string \
+	in-target wget -P /etc/systemd/system/ http://10.0.2.2:8001/kickstart/runonce.service; \
+	in-target systemctl enable runonce; \
+	in-target mkdir /root/runonce/scripts; \
+	in-target wget -P /root/runonce/ http://10.0.2.2:8001/kickstart/runonce.pl; \
+	in-target chmod +x /root/runonce/runonce.pl; \
+	in-target wget -P /root/runonce/scripts/ http://10.0.2.2:8001/kickstart/fixnet.pl
+	in-target wget -q -O - --post-data "vmName=$VMNAME" http://10.0.2.2:8001/installFinished

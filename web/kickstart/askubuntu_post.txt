@@ -1,0 +1,96 @@
+Network interfaces are not available even during 'late-command'. They are available on the first boot after having done an automated install.
+
+This is why 'ip -o link' will be empty if run during a preseed late-command.
+
+One way to do this is to create a simple systemd unit that runs after the network is ready, then have that adjust interface names and/or netplan configuration.
+
+Example basic service that could be dropped into '/etc/systemd/system':
+```
+[Unit]
+Description=Run Once
+After=network-online.target
+Requires=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=
+ExecStart=/root/runonce.pl
+
+[Install]
+WantedBy=multi-user.target
+```
+
+In this example I setup a script to run things a single time, to make an easy method for running one or many scripts that you want to run once right after install. The corresponding runonce.pl:
+```
+#!/usr/bin/perl -w
+use strict;
+
+my $folder = "/root/runonce/scripts";
+my $donef = "/root/runonce/done";
+if( ! -e $donef ) {
+	mkdir $donef;
+}
+my $outputf = "/root/runonce/output";
+if( ! -e $outputf ) {
+	mkdir $outputf;
+}
+
+opendir( my $dh, $folder );
+my @files = readdir( $dh );
+closedir( $dh );
+
+for my $file ( @files ) {
+	next if( $file =~ m/^\.+$/ );
+	my $full = "$folder/$file";
+	my $done = "$donef/$file";
+	my $output = "$outputf/$file";
+	my $output2 = "$outputf/$file-error";
+	if( -e $done ) {
+		unlink $done;
+	}
+	chmod "0700", $full;
+	`$full > $output 2> $output2`;
+	rename $full, $done;
+}
+```
+
+In order to set everything up from preseed, contents for preseed file:
+```
+d-i preseed/late_command string \
+	in-target wget -P /etc/systemd/system/ http://10.0.2.2:8001/kickstart/runonce.service; \
+	in-target systemctl enable runonce; \
+	in-target mkdir /root/runonce/scripts; \
+	in-target wget -P /root/runonce/ http://10.0.2.2:8001/kickstart/runonce.pl; \
+	in-target chmod +x /root/runonce/runonce.pl; \
+	in-target wget -P /root/runonce/scripts/ http://10.0.2.2:8001/kickstart/fixnet.pl
+```
+
+You'll need to adjust this to have a location to fetch the files from. In this example it is querying the gateway IP address of Virtualbox, which in turn then hits a server running on my local desktop.
+
+Example "fixnet.pl" script that is being run after initial install:
+```
+#!/usr/bin/perl -w
+use strict;
+
+my @netlines = `ip -o link`;
+
+my $npFile = "/etc/netplan/vbox.yaml";
+open( my $npFh, ">$npFile" ) or die "Cannot write to $npFile";
+
+print $npFh "network:\n  version: 2\n  renderer: networkd\n  ethernets:\n";
+
+for my $netline ( @netlines ) {
+	if( $netline =~ m/(enp[0-9a-z]+)/ ) {
+		my $interface = $1;
+		print STDERR "Adding interface $interface to netplan\n";
+		print $npFh "    $interface:\n";
+		print $npFh "      dhcp4: yes\n";
+	}
+}
+
+close $npFh;
+`netplan apply`;
+exit 0;
+```
+
+https://askubuntu.com/questions/702723/ubuntu-autoinstall-interface-names/1162240#1162240
